@@ -37,11 +37,14 @@ Download `neev-cli_windows_amd64.zip` (or `arm64`) from the [latest release](htt
 ## Quickstart
 
 ```sh
-# Sign in (dev/staging; see --help for endpoint flags)
+# Sign in with a Personal Access Token (mint one in the web UI), then paste it
 neev-cli auth login
+# For scripts/CI, pipe the token instead of prompting:
+#   echo "$NEEVCLOUD_API_TOKEN" | neev-cli auth login --token-stdin
 
-# Point at an environment and persist it
-neev-cli config set tenant-url https://tenant.<env>.ai.neevcloud.com
+# Targets production (https://api.ai.neevcloud.com) by default. Pin another
+# environment by persisting its consolidated base URL:
+neev-cli config set api-base https://api.<env>.ai.neevcloud.com
 
 # Explore your resources
 neev-cli org list
@@ -57,20 +60,6 @@ neev-cli --help
 ```
 
 See [`examples/`](examples/) for fuller flows.
-
-## Configuration
-
-`neev-cli` reads session and preference state from its config directory and honors environment overrides:
-
-| Variable | Purpose |
-|---|---|
-| `NEEVCLI_CONFIG_DIR` | Override the config/session directory |
-| `NEEVCLI_TENANT_URL` | Tenant-service base URL |
-| `NEEVCLI_BILLING_URL` | Billing-service base URL |
-| `NEEVCLI_AIRUNTIME_URL` | AI Runtime service base URL |
-| `NO_COLOR` | Disable colored output |
-
-Run `neev-cli config --help` to manage persisted preferences.
 
 ## Support & issues
 

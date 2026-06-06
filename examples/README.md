@@ -6,13 +6,16 @@ your own identifiers, and run `neev-cli <command> --help` for the full flag set.
 ## 1. Sign in and pin an environment
 
 ```sh
-# Authenticate (dev/staging password login; see `auth login --help` for flags)
-neev-cli auth login --tenant-url https://tenant.dev.ai.neevcloud.com
+# Authenticate with a Personal Access Token (mint one in the web UI). `auth login`
+# prompts for the PAT; pipe it with --token-stdin for scripts/CI.
+neev-cli auth login
+echo "$NEEVCLOUD_API_TOKEN" | neev-cli auth login --token-stdin
 
-# Persist the tenant URL so later commands don't need the flag
-neev-cli config set tenant-url https://tenant.dev.ai.neevcloud.com
+# Production (https://api.ai.neevcloud.com) is the default. Persist a different
+# environment's consolidated base URL so later commands don't need the flag:
+neev-cli config set api-base https://api.dev.ai.neevcloud.com
 
-# Confirm the active session
+# Confirm the active session (auth method + resolved api-base)
 neev-cli auth status
 ```
 
