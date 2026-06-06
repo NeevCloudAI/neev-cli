@@ -3,7 +3,7 @@
 Short, copy-pasteable flows for common tasks. Replace `<org-id>` / `<project-id>` with
 your own identifiers, and run `neev-cli <command> --help` for the full flag set.
 
-## 1. Sign in and pin an environment
+## 1. Sign in
 
 ```sh
 # Authenticate with a Personal Access Token (mint one in the web UI). `auth login`
@@ -11,11 +11,7 @@ your own identifiers, and run `neev-cli <command> --help` for the full flag set.
 neev-cli auth login
 echo "$NEEVCLOUD_API_TOKEN" | neev-cli auth login --token-stdin
 
-# Production (https://api.ai.neevcloud.com) is the default. Persist a different
-# environment's consolidated base URL so later commands don't need the flag:
-neev-cli config set api-base https://api.dev.ai.neevcloud.com
-
-# Confirm the active session (auth method + resolved api-base)
+# Confirm the active session
 neev-cli auth status
 ```
 

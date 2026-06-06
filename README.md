@@ -42,10 +42,6 @@ neev-cli auth login
 # For scripts/CI, pipe the token instead of prompting:
 #   echo "$NEEVCLOUD_API_TOKEN" | neev-cli auth login --token-stdin
 
-# Targets production (https://api.ai.neevcloud.com) by default. Pin another
-# environment by persisting its consolidated base URL:
-neev-cli config set api-base https://api.<env>.ai.neevcloud.com
-
 # Explore your resources
 neev-cli org list
 neev-cli project list --org-id <org-id>
