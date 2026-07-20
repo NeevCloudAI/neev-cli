@@ -9,13 +9,17 @@ binary, one login, one command tree — reach for new capabilities as they ship.
 
 - **`neev-cli sandbox`** — the full agent-sandbox lifecycle: create, list, get,
   pause, resume, delete, and live metrics, plus snapshots, restore, and fork.
-  Inside a running sandbox: `fs` (read/write/list files), `exec` (run a command,
-  buffered, streamed, or interactive), and a `process` supervisor for
-  long-running, detached work. Sandboxes are isolated compute environments for
-  AI agents.
+  Inside a running sandbox: `fs` (read/write/list files), `exec` (run a command —
+  streams live by default, `-o json` to buffer, `-it` for interactive), a
+  `process` supervisor for long-running, detached work, and `ssh-config` /
+  `ssh-proxy` for SSH access (terminal, `scp`/`rsync`, or an IDE). Sandboxes are
+  isolated compute environments for AI agents.
 - **`neev-cli sandbox template`** — the platform sandbox-template catalogue
   (list, get). A template id (e.g. `sb-ubuntu-26-04-minimal`) is optional when
   creating a sandbox; omit it to use the platform default.
+- **`neev-cli agent`** — manage first-class AI agents (e.g. `claude-code`) backed
+  by a sandbox: create, list, get, update, pause, resume, delete, and browse the
+  agent-template catalogue. Reach an agent's shell via its backing sandbox.
 - **`neev-cli org` / `project` / `context`** — browse organizations and
   projects, and save a default org/project so you can drop the flags.
 - **`neev-cli airuntime`** — manage AI runtimes (create, list, get, metrics,
@@ -105,17 +109,18 @@ neev-cli auth login
 neev-cli context list                                   # discover your orgs/projects
 neev-cli context set default <org-id> <project-id>      # save and make it current
 
-# 3. Create a sandbox from a template.
-neev-cli sandbox create --name my-agent --template-id sb-ubuntu-26-04-minimal \
-  --cpu 1 --memory-gb 2 --disk-gb 10
+# 3. Create a sandbox (omit --template-id to use the platform default).
+neev-cli sandbox create --name my-agent --cpu 1 --memory-gb 2 --disk-gb 10
 
-# 4. Run a command inside it (needs NEEV_API_KEY set).
-neev-cli sandbox exec --sandbox-id <sandbox-id> -- echo "hello from the sandbox"
+# 4. Run a command inside it. Runtime commands (exec/fs/process) authenticate
+#    with a sandbox API key — set NEEV_API_KEY first.
+export NEEV_API_KEY="your-sandbox-api-key"
+neev-cli sandbox exec <sandbox-id> -- echo "hello from the sandbox"
 
 # 5. Pause when idle, resume on demand, delete when done.
-neev-cli sandbox pause  --sandbox-id <sandbox-id>
-neev-cli sandbox resume --sandbox-id <sandbox-id>
-neev-cli sandbox delete --sandbox-id <sandbox-id> --yes
+neev-cli sandbox pause  <sandbox-id>
+neev-cli sandbox resume <sandbox-id>
+neev-cli sandbox delete <sandbox-id> --yes
 ```
 
 Every command supports `--help`; append it to any command or subcommand for the
@@ -138,14 +143,13 @@ neev-cli context use prod                          # switch between saved contex
 ### Sandboxes
 
 ```sh
-neev-cli sandbox create --name my-agent --template-id sb-ubuntu-26-04-minimal \
-  --cpu 1 --memory-gb 2 --disk-gb 10 --env FOO=bar
+neev-cli sandbox create --name my-agent --cpu 1 --memory-gb 2 --disk-gb 10 --env FOO=bar
 neev-cli sandbox list --limit 50
-neev-cli sandbox get     --sandbox-id <sandbox-id>
-neev-cli sandbox pause   --sandbox-id <sandbox-id>   # stop billable runtime; keep disks
-neev-cli sandbox resume  --sandbox-id <sandbox-id>
-neev-cli sandbox delete  --sandbox-id <sandbox-id> --yes
-neev-cli sandbox metrics --sandbox-id <sandbox-id> --step 60s   # live health metrics
+neev-cli sandbox get     <sandbox-id>
+neev-cli sandbox pause   <sandbox-id>   # stop billable runtime; keep disks
+neev-cli sandbox resume  <sandbox-id>
+neev-cli sandbox delete  <sandbox-id> --yes
+neev-cli sandbox metrics <sandbox-id> --step 60s   # live health metrics
 ```
 
 For sandboxes that need egress rules or other advanced fields, pass the full
@@ -157,12 +161,13 @@ neev-cli sandbox create --from-file ./sandbox.json     # or --from-file - to rea
 
 ### Templates
 
-`--template-id` is optional — omit it to use the platform default, pass a known
-id, or browse the catalogue first:
+`--template-id` on `sandbox create` is optional — omit it to use the platform
+default (`sb-debian-12-minimal`), pass a known id, or browse the catalogue
+first:
 
 ```sh
 neev-cli sandbox template list
-neev-cli sandbox template get --template-id sb-ubuntu-26-04-minimal
+neev-cli sandbox template get sb-ubuntu-26-04-minimal
 ```
 
 ### Files
@@ -183,19 +188,19 @@ neev-cli sandbox fs list  --sandbox-id <sandbox-id> --path . --recursive
 
 ### Running commands
 
-`sandbox exec` runs a command inside a running sandbox. The program and its
-arguments follow `--`; no shell is invoked, so the program runs directly with its
-argument vector.
+`sandbox exec` runs a command inside a running sandbox, addressed by a
+positional id. The program and its arguments follow `--`; no shell is invoked,
+so the program runs directly with its argument vector.
 
 ```sh
-# Buffered: run to completion, print captured output as JSON.
-neev-cli sandbox exec --sandbox-id <sandbox-id> -- ls -la /workspace
+# Default: stream stdout/stderr live to your terminal as the command runs.
+neev-cli sandbox exec <sandbox-id> -- ls -la /workspace
 
-# Streamed: see stdout/stderr live as the command produces it.
-neev-cli sandbox exec --sandbox-id <sandbox-id> --stream -- python main.py
+# -o json: run to completion and buffer the result into {stdout, stderr, exit_code}.
+neev-cli sandbox exec <sandbox-id> -o json -- python main.py
 
 # Interactive (kubectl exec -it style): attach your terminal to the program.
-neev-cli sandbox exec --sandbox-id <sandbox-id> -it -- bash
+neev-cli sandbox exec <sandbox-id> -it -- bash
 ```
 
 `-it` needs a real terminal on stdin and forwards resizes and Ctrl-C. Feed input
@@ -225,6 +230,22 @@ neev-cli sandbox process kill-all --sandbox-id <sandbox-id>
 Output is captured in a bounded ring; `logs` prints from a resumable cursor, and
 `-f` streams until the process exits.
 
+### SSH & Claude Desktop access
+
+`sandbox ssh-config` writes a `~/.ssh/config` Host block for a sandbox — a
+`ProxyCommand` through `neev-cli sandbox ssh-proxy`, the `neev` login user, and a
+pinned host key — so you can `ssh` in by name or point Claude Desktop at it. Needs
+`NEEV_API_KEY` in the environment `ssh` runs the ProxyCommand from.
+
+```sh
+neev-cli sandbox ssh-config <sandbox-id> --write   # write the Host block + pin the host key
+ssh <sandbox-name-or-id>                            # connect (login user: neev)
+neev-cli sandbox ssh-config --list                  # list managed blocks
+neev-cli sandbox ssh-config <sandbox-id> --remove   # remove the block + pin
+```
+
+To run Claude Code inside a sandbox, see [Connect from Claude Desktop](docs/claude-desktop-ssh.md).
+
 ### Snapshots, fork & restore
 
 Capture a sandbox's state as a **snapshot**, then **restore** the same sandbox
@@ -235,23 +256,24 @@ running.
 
 ```sh
 # Capture a snapshot, then watch it become Ready.
-neev-cli sandbox snapshot create --sandbox-id <sandbox-id> --name checkpoint
-neev-cli sandbox snapshot list   --sandbox-id <sandbox-id>
-neev-cli sandbox snapshot get    --snapshot-id <snapshot-id>
+neev-cli sandbox snapshot create <sandbox-id> --name checkpoint
+neev-cli sandbox snapshot list   <sandbox-id>
+neev-cli sandbox snapshot get    <snapshot-id>
 
 # Restore the original in place once the snapshot is Ready.
-neev-cli sandbox restore --sandbox-id <sandbox-id> --snapshot-id <snapshot-id>
+neev-cli sandbox restore <sandbox-id> --snapshot-id <snapshot-id>
 
 # Fork the current live state into a new sandbox (no snapshot needed).
-neev-cli sandbox fork --sandbox-id <sandbox-id> --name my-fork
+neev-cli sandbox fork <sandbox-id> --name my-fork
 ```
 
 ### JSON output & scripting
 
-Commands print JSON to stdout, so they compose with [`jq`](https://jqlang.github.io/jq/):
+Commands print a table by default. Add `-o json` for machine-readable output
+that composes with [`jq`](https://jqlang.github.io/jq/):
 
 ```sh
-neev-cli sandbox list | jq -r '.data[].id'
+neev-cli sandbox list -o json | jq -r '.items[].id'
 ```
 
 ## Documentation
