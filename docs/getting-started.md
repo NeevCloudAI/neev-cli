@@ -79,22 +79,21 @@ neev-cli sandbox list                              # now uses the default contex
 
 ## Create your first sandbox
 
-Only `--name` is required — the platform picks a default template and region when
-you omit them. Pass `--template-id` to pin one.
+Only `--name` is required — the platform picks a default template (currently
+`sb-debian-12-minimal`) and region when you omit them. Pass `--template-id` to pin
+a different one.
 
 ```sh
-neev-cli sandbox create --name my-first-sandbox \
-  --template-id sb-ubuntu-26-04-minimal \
-  --cpu 1 --memory-gb 2 --disk-gb 10
+SANDBOX_ID=$(neev-cli sandbox create --name my-first-sandbox \
+  --cpu 1 --memory-gb 2 --disk-gb 10 -o json | jq -r '.id')
 ```
 
-The response includes the sandbox `id` and its `phase`. A sandbox starts
-`Pending`; poll `sandbox get` until it reports `Ready` before running anything
-inside it:
+A sandbox starts `Pending`; poll `sandbox get` until it reports `Ready` before
+running anything inside it. The default output is a table, so add `-o json` to
+pull out a single field:
 
 ```sh
-SANDBOX_ID="<id from create>"
-until [ "$(neev-cli sandbox get --sandbox-id "$SANDBOX_ID" | jq -r '.phase')" = "Ready" ]; do
+until [ "$(neev-cli sandbox get "$SANDBOX_ID" -o json | jq -r '.phase')" = "Ready" ]; do
   sleep 2
 done
 ```
@@ -107,9 +106,9 @@ Runtime commands authenticate with a sandbox API key:
 export NEEV_API_KEY="your-sandbox-api-key"
 
 # Run a command (no shell is invoked; the program follows --).
-neev-cli sandbox exec --sandbox-id "$SANDBOX_ID" -- sh -c 'echo hello'
+neev-cli sandbox exec "$SANDBOX_ID" -- sh -c 'echo hello'
 
-# Write and read a workspace-relative file.
+# Write and read a workspace-relative file (fs takes --sandbox-id, not a positional id).
 printf 'hi\n' | neev-cli sandbox fs write --sandbox-id "$SANDBOX_ID" --path notes.txt --in -
 neev-cli sandbox fs read  --sandbox-id "$SANDBOX_ID" --path notes.txt
 ```
@@ -117,15 +116,32 @@ neev-cli sandbox fs read  --sandbox-id "$SANDBOX_ID" --path notes.txt
 For long-running work that should outlive a single call, use `sandbox process`
 (see the [command reference](command-reference.md#sandbox-process)).
 
+## Try an AI agent
+
+Beyond raw sandboxes, `neev-cli agent` manages first-class AI agents (e.g.
+`claude-code`) backed by a sandbox:
+
+```sh
+AGENT_ID=$(neev-cli agent create --name code-helper --agent-template claude-code \
+  --cpu 1 --memory-gb 2 -o json | jq -r '.id')
+neev-cli agent list
+neev-cli agent delete "$AGENT_ID" --yes
+```
+
+The full lifecycle — create, resolve the agent's backing sandbox, run a command
+in it, resize, pause/resume, delete — is scripted in
+[`examples/agent.sh`](../examples/agent.sh); see also
+[`examples/sandbox.sh`](../examples/sandbox.sh) for the plain sandbox flow.
+
 ## Clean up
 
 ```sh
-neev-cli sandbox pause  --sandbox-id "$SANDBOX_ID"   # stop billable runtime, keep disks
-neev-cli sandbox delete --sandbox-id "$SANDBOX_ID" --yes
+neev-cli sandbox pause  "$SANDBOX_ID"   # stop billable runtime, keep disks
+neev-cli sandbox delete "$SANDBOX_ID" --yes
 ```
 
 The full flow is scripted in
-[`examples/first-sandbox.sh`](../examples/first-sandbox.sh).
+[`examples/sandbox.sh`](../examples/sandbox.sh).
 
 ## Troubleshooting
 
@@ -144,5 +160,6 @@ The full flow is scripted in
 | Document | What you'll find |
 | -------- | ---------------- |
 | [Command reference](command-reference.md) | Every command group with flags and snippets |
+| [Connect from Claude Desktop](claude-desktop-ssh.md) | Run Claude Code inside a sandbox over SSH |
 | [`../README.md`](../README.md) | Short overview and usage snippets |
 | [`../examples/`](../examples/) | Runnable end-to-end scripts |

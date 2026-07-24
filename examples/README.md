@@ -1,112 +1,89 @@
 # neev-cli examples
 
-Short, copy-pasteable flows for common tasks. Replace `<org-id>` / `<project-id>`
-/ `<sandbox-id>` with your own identifiers, and run `neev-cli <command> --help`
-for the full flag set.
+Runnable, end-to-end scripts — one per resource — plus a quickstart that gets you
+set up. Start with the quickstart; it saves a **context** (your org + project) so
+every other command can drop `--org-id` / `--project-id`.
 
-The runnable scripts in this folder need [`jq`](https://jqlang.github.io/jq/) and,
-for anything that runs inside a sandbox, `NEEV_API_KEY` set to a sandbox API key.
+All scripts need [`jq`](https://jqlang.github.io/jq/). The ones that run *inside* a
+sandbox (exec, files, processes) also need `NEEV_API_KEY` set to a sandbox API key.
+Run `neev-cli <command> --help` for the full flag set of anything here.
 
 | Script | What it does |
 | ------ | ------------ |
-| [`first-sandbox.sh`](first-sandbox.sh) | Create a sandbox, wait until Ready, run a command, write/read a file, delete it |
-| [`files.sh`](files.sh) | Upload, read, and list files in a sandbox workspace |
-| [`processes.sh`](processes.sh) | Start a detached process, follow its logs, inspect and signal it |
-| [`snapshots-fork-restore.sh`](snapshots-fork-restore.sh) | Snapshot a sandbox, restore in place, and fork its live state |
-| [`metrics.sh`](metrics.sh) | Read live health metrics for a sandbox |
+| [`quickstart.sh`](quickstart.sh) | Check the install, sign in, save a context, and confirm it works — run this first |
+| [`sandbox.sh`](sandbox.sh) | The sandbox resource end to end: create, exec, files, a background process, metrics, pause/resume, delete |
+| [`agent.sh`](agent.sh) | The agent resource end to end: create a `claude-code` agent, reach its backing sandbox, resize, pause/resume, delete |
+| [`airuntime.sh`](airuntime.sh) | The AI-runtime resource: browse templates, create from a request file, inspect, metrics, delete |
+| [`snapshots.sh`](snapshots.sh) | Snapshot a sandbox, restore it in place, and fork its live state into a new sandbox |
+| [`account.sh`](account.sh) | Browse organizations, projects, and billing products |
 
-## 1. Sign in
+## Setup (once)
 
 ```sh
-# Authenticate with a Personal Access Token (mint one in the web UI). `auth login`
-# prompts for the PAT; pipe it with --token-stdin for scripts/CI.
+# 1. Sign in with a Personal Access Token (mint one in the web UI).
 neev-cli auth login
-echo "$NEEV_API_TOKEN" | neev-cli auth login --token-stdin
 
-# Confirm the active session
-neev-cli auth status
-```
+# 2. Save a context — 'context set' saves it AND makes it current in one step.
+#    After this, org/project are filled in automatically wherever they're needed.
+neev-cli context set demo <org-id> <project-id>
 
-## 2. Browse organizations and projects
-
-```sh
-neev-cli org list
-neev-cli org get --org-id <org-id>
-
-neev-cli project list --org-id <org-id>
-neev-cli project get --org-id <org-id> --project-id <project-id>
-```
-
-Save a default org + project once so later commands can omit the flags:
-
-```sh
-neev-cli context set default <org-id> <project-id>   # saved and made current
-neev-cli context current
-```
-
-## 3. Create and use a sandbox
-
-```sh
-# Create from a template (omit --template-id to use the platform default).
-neev-cli sandbox create --name my-agent --template-id sb-ubuntu-26-04-minimal \
-  --cpu 1 --memory-gb 2 --disk-gb 10
-
-# Runtime commands (fs/exec/process) need a sandbox API key.
+# 3. A sandbox API key, for commands that run inside a sandbox (exec/fs/process).
 export NEEV_API_KEY="your-sandbox-api-key"
-
-# Run a command; -- separates the program from CLI flags.
-neev-cli sandbox exec --sandbox-id <sandbox-id> -- ls -la /workspace
-
-# Stream output live, or attach an interactive terminal.
-neev-cli sandbox exec --sandbox-id <sandbox-id> --stream -- python main.py
-neev-cli sandbox exec --sandbox-id <sandbox-id> -it -- bash
-
-# Pause, resume, delete.
-neev-cli sandbox pause  --sandbox-id <sandbox-id>
-neev-cli sandbox resume --sandbox-id <sandbox-id>
-neev-cli sandbox delete --sandbox-id <sandbox-id> --yes
 ```
 
-The [`first-sandbox.sh`](first-sandbox.sh) script runs this whole flow end to end.
-
-## 4. Work with AI runtimes
+`quickstart.sh` does steps 1–2 for you:
 
 ```sh
-# List available templates, then list running runtimes
-neev-cli airuntime template list
-neev-cli airuntime list --org-id <org-id> --project-id <project-id>
-
-# Create a runtime from a request file
-cat > runtime.json <<'JSON'
-{
-  "name": "my-jupyter",
-  "region": "as-south-1",
-  "templateID": "tpl-jupyterlab-pytorch",
-  "planId": "gpu-h200-on-demand-1h",
-  "gpuCount": 1
-}
-JSON
-neev-cli airuntime create --org-id <org-id> --project-id <project-id> --from-file runtime.json
-
-# Inspect, watch metrics, then tear it down
-neev-cli airuntime get     --org-id <org-id> --project-id <project-id> --airuntime-id <id>
-neev-cli airuntime metrics --org-id <org-id> --project-id <project-id> --airuntime-id <id>
-neev-cli airuntime delete  --org-id <org-id> --project-id <project-id> --airuntime-id <id> --yes
+./examples/quickstart.sh <org-id> <project-id>
 ```
 
-## 5. Billing
+Don't know your ids? `neev-cli org list`, then `neev-cli project list --org-id <org-id>`.
+
+## Run
+
+Each script provisions real resources and cleans them up on exit, so the project
+needs available credits.
 
 ```sh
-neev-cli billing products list
+./examples/quickstart.sh <org-id> <project-id>   # setup + a first look
+./examples/sandbox.sh                            # the sandbox resource
+./examples/agent.sh                              # the agent resource
+./examples/snapshots.sh                          # snapshot / restore / fork
+./examples/airuntime.sh                          # an AI runtime
+./examples/account.sh                            # orgs, projects, billing
 ```
+
+## Conventions used here
+
+- **Context, not flags.** After `context set`/`context use`, commands read your
+  org and project from the current context — the scripts don't pass `--org-id` /
+  `--project-id`. (The one exception is `airuntime template`, where `--org-id`
+  selects the org catalogue vs. the platform one.)
+- **Positional ids.** Resources are addressed positionally:
+  `neev-cli sandbox get <id>`, `agent delete <id> --yes`,
+  `sandbox snapshot create <sandbox-id>`, `sandbox restore <sandbox-id> --snapshot-id <id>`.
+  (`sandbox fs` and `sandbox process` are the exception — they take `--sandbox-id`.)
+- **`-o json` to script.** The default output is a human-readable table; add
+  `-o json` and pipe through `jq` when you need to capture an id or field.
+- **`--yes` skips confirmation** on destructive commands (`-y` also works).
+- **Sandbox file paths are workspace-relative** — absolute paths are rejected.
+
+## Environment reference
+
+| Variable | Used by | Notes |
+| -------- | ------- | ----- |
+| `NEEV_API_TOKEN` | lifecycle commands (via `auth login`) | Personal Access Token |
+| `NEEV_API_KEY` | runtime commands (`exec`/`fs`/`process`) | a sandbox API key |
+| `NEEV_ORG_ID` / `NEEV_PROJECT_ID` | `quickstart.sh` only | convenience inputs to the quickstart |
+| `AGENT_TEMPLATE` | `agent.sh` | agent template id (default `claude-code`) |
 
 ## Scripting tip
 
-Commands print JSON to stdout, so they compose with `jq`. Note the envelope
-differs by resource — org/project lists use `.data[]`, while sandbox lists use
-`.items[]`:
+Commands print a table by default and JSON with `-o json`, so they compose with
+`jq`. Note the list envelope differs by resource — org/project lists use `.data[]`,
+while sandbox lists use `.items[]`:
 
 ```sh
-neev-cli project list --org-id <org-id> | jq -r '.data[].id'
-neev-cli sandbox list --org-id <org-id> --project-id <project-id> | jq -r '.items[].id'
+neev-cli project list -o json | jq -r '.data[].id'
+neev-cli sandbox list -o json | jq -r '.items[].id'
 ```
