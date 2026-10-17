@@ -1,49 +1,37 @@
 #!/usr/bin/env bash
 #
-# Snapshot, restore, and fork a sandbox. A snapshot captures a sandbox's state;
-# restore rolls the same sandbox back to it; fork branches the live state into a
-# brand-new sandbox while the source keeps running.
+# Snapshots: capture a sandbox, roll it back after a change, fork its current state
+# into a new sandbox, and restore the snapshot into another new sandbox.
 #
-# Prerequisites:
-#   ./examples/quickstart.sh <org-id> <project-id>
-#   export NEEV_API_KEY="your-sandbox-api-key"   # to write the marker file
-#
+# Prerequisite: ./examples/quickstart.sh <org> <project>
 # Requires: jq
 
 set -euo pipefail
 
-: "${NEEV_API_KEY:?export NEEV_API_KEY (a sandbox API key) for the fs step}"
+NAME="example-snap-$RANDOM"
 
-echo "Creating a source sandbox…"
-SANDBOX_ID=$(neev-cli sandbox create --name snapshot-demo -o json | jq -r '.id')
-FORK_ID=""
-
-# Clean up the source and, if we got that far, the fork.
-cleanup() {
-  neev-cli sandbox delete "$SANDBOX_ID" --yes >/dev/null 2>&1 || true
-  [ -n "$FORK_ID" ] && neev-cli sandbox delete "$FORK_ID" --yes >/dev/null 2>&1 || true
-}
+neev-cli sandbox create --name "$NAME" --wait
+cleanup() { neev-cli sandbox delete "$NAME" "$NAME-fork" "$NAME-restored" --yes >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-until [ "$(neev-cli sandbox get "$SANDBOX_ID" -o json | jq -r '.phase')" = "Ready" ]; do sleep 2; done
+echo "v1" | neev-cli sandbox fs write "$NAME" version.txt --in -
 
-echo "Writing a marker file so the snapshot is distinguishable…"
-printf 'captured-at-snapshot\n' | neev-cli sandbox fs write --sandbox-id "$SANDBOX_ID" --path marker.txt --in -
+echo "Capturing a snapshot…"
+SNAPSHOT=$(neev-cli sandbox snapshot create "$NAME" --name v1 -o json | jq -r '.id')
+until [ "$(neev-cli sandbox snapshot show "$SNAPSHOT" -o json | jq -r '.status')" = "Ready" ]; do sleep 2; done
+neev-cli sandbox snapshot get "$NAME"
 
-echo "Creating a snapshot, then waiting until it is Ready…"
-# snapshot create takes the sandbox id positionally; snapshot get takes the snapshot id.
-SNAPSHOT_ID=$(neev-cli sandbox snapshot create "$SANDBOX_ID" --name checkpoint -o json | jq -r '.id')
-until [ "$(neev-cli sandbox snapshot get "$SNAPSHOT_ID" -o json | jq -r '.status')" = "Ready" ]; do sleep 2; done
-echo "snapshot $SNAPSHOT_ID ready"
+echo "Changing the sandbox, then rolling it back…"
+echo "v2" | neev-cli sandbox fs write "$NAME" version.txt --in -
+neev-cli sandbox rollback "$NAME" --snapshot "$SNAPSHOT" --yes --wait
+neev-cli sandbox fs read "$NAME" version.txt   # v1
 
-echo "Snapshots for this sandbox:"
-neev-cli sandbox snapshot list "$SANDBOX_ID"
+echo "Forking the current state into a new sandbox…"
+neev-cli sandbox fork "$NAME" --as "$NAME-fork" --wait
+neev-cli sandbox fs read "$NAME-fork" version.txt
 
-echo "Restoring the source sandbox in place…"
-neev-cli sandbox restore "$SANDBOX_ID" --snapshot-id "$SNAPSHOT_ID"
+echo "Restoring the snapshot into another new sandbox…"
+neev-cli sandbox create --name "$NAME-restored" --restore "$SNAPSHOT" --wait
+neev-cli sandbox fs read "$NAME-restored" version.txt
 
-echo "Forking the live state into a new sandbox…"
-FORK_ID=$(neev-cli sandbox fork "$SANDBOX_ID" --name snapshot-demo-fork -o json | jq -r '.id')
-echo "forked $FORK_ID"
-
-echo "Done — both sandboxes are deleted on exit."
+echo "Done. All three sandboxes, and the snapshot, are deleted on exit."
