@@ -1,53 +1,40 @@
 #!/usr/bin/env bash
 #
-# The AI-runtime resource, end to end: browse the template catalogue, create a
-# runtime from a request file, inspect it, read metrics, then delete it.
+# An AI runtime: browse runtime templates and plans, create a runtime from a request
+# file, inspect it, read its metrics, then delete it.
 #
-# Uses your Personal Access Token and reads org/project from the current context.
+# This creates a billed GPU runtime. Fill in the region, GPU configuration and plan
+# below before you run it.
 #
-# Prerequisites:
-#   ./examples/quickstart.sh <org-id> <project-id>
-#
+# Prerequisite: ./examples/quickstart.sh <org> <project>
 # Requires: jq
 
 set -euo pipefail
 
-echo "Runtime templates on the platform catalogue:"
-# For 'airuntime template', --org-id is a mode switch (omit = platform catalogue,
-# set = an org's catalogue), so it is NOT auto-filled from the context.
-neev-cli airuntime template list
+echo "Runtime templates:"
+neev-cli airuntime template get
 
-# Fill in real values before running:
-#   templateID   from 'airuntime template list'
-#   gpuConfigID  a UUID from the inventory API / console
-#   planId       a plan you can access (e.g. gpu-h200-on-demand-1h)
-# Optional: add "sshKeys": ["ssh-ed25519 AAAA... you@host"] for SSH access.
-# storage is optional — omit it to use the free 100 GB network volume.
-REQ=$(mktemp)
-cat > "$REQ" <<'JSON'
+echo "Plans and prices:"
+neev-cli billing products get
+
+REQUEST=$(mktemp)
+cat > "$REQUEST" <<'JSON'
 {
-  "name": "quickstart-jupyter",
-  "region": "as-south-1",
+  "name": "example-notebook",
+  "region": "REPLACE_WITH_REGION",
   "templateID": "tpl-jupyterlab-pytorch",
   "gpuConfigID": "REPLACE_WITH_GPU_CONFIG_ID",
   "gpuCount": 1,
-  "planId": "gpu-h200-on-demand-1h"
+  "planId": "REPLACE_WITH_PLAN_ID"
 }
 JSON
 
-echo "Creating a runtime from the request file…"
-AIRUNTIME_ID=$(neev-cli airuntime create --from-file "$REQ" -o json | jq -r '.id')
-echo "created runtime $AIRUNTIME_ID"
-
-# Always clean up the runtime and the temp file.
-cleanup() {
-  neev-cli airuntime delete "$AIRUNTIME_ID" --yes >/dev/null 2>&1 || true
-  rm -f "$REQ"
-}
+echo "Creating the runtime…"
+ID=$(neev-cli airuntime create --filename "$REQUEST" -o json | jq -r '.id')
+cleanup() { neev-cli airuntime delete "$ID" --yes >/dev/null 2>&1 || true; rm -f "$REQUEST"; }
 trap cleanup EXIT
 
-echo "Inspecting the runtime and reading its metrics…"
-neev-cli airuntime get     "$AIRUNTIME_ID"
-neev-cli airuntime metrics "$AIRUNTIME_ID"
+neev-cli airuntime get "$ID"
+neev-cli airuntime metrics "$ID"
 
-echo "Done — the runtime is deleted on exit."
+echo "Done. The runtime is deleted on exit."

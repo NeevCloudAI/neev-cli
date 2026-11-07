@@ -1,89 +1,49 @@
-# neev-cli examples
+# Examples
 
-Runnable, end-to-end scripts — one per resource — plus a quickstart that gets you
-set up. Start with the quickstart; it saves a **context** (your org + project) so
-every other command can drop `--org-id` / `--project-id`.
-
-All scripts need [`jq`](https://jqlang.github.io/jq/). The ones that run *inside* a
-sandbox (exec, files, processes) also need `NEEV_API_KEY` set to a sandbox API key.
-Run `neev-cli <command> --help` for the full flag set of anything here.
+Runnable scripts, one per area. Each creates real resources in your project and deletes
+them when it finishes, even if a step fails.
 
 | Script | What it does |
-| ------ | ------------ |
-| [`quickstart.sh`](quickstart.sh) | Check the install, sign in, save a context, and confirm it works — run this first |
-| [`sandbox.sh`](sandbox.sh) | The sandbox resource end to end: create, exec, files, a background process, metrics, pause/resume, delete |
-| [`agent.sh`](agent.sh) | The agent resource end to end: create a `claude-code` agent, reach its backing sandbox, resize, pause/resume, delete |
-| [`airuntime.sh`](airuntime.sh) | The AI-runtime resource: browse templates, create from a request file, inspect, metrics, delete |
-| [`snapshots.sh`](snapshots.sh) | Snapshot a sandbox, restore it in place, and fork its live state into a new sandbox |
-| [`account.sh`](account.sh) | Browse organizations, projects, and billing products |
+| --- | --- |
+| [`quickstart.sh`](./quickstart.sh) | Check the install, sign in, and save a context. Run it first |
+| [`sandbox.sh`](./sandbox.sh) | Create a sandbox, run commands, copy files in and out, read metrics, pause and resume |
+| [`networking.sh`](./networking.sh) | Serve an app at a public preview URL, and allow or block outbound hosts |
+| [`snapshots.sh`](./snapshots.sh) | Snapshot a sandbox, roll it back, fork it, and restore the snapshot into a new sandbox |
+| [`agent.sh`](./agent.sh) | Create a Claude Code agent, work inside it, resize, pause and resume it |
+| [`airuntime.sh`](./airuntime.sh) | Create a GPU runtime from a request file, inspect it, read its metrics |
+| [`account.sh`](./account.sh) | List organizations, projects, prices and saved contexts |
 
-## Setup (once)
+## Setup
 
-```sh
-# 1. Sign in with a Personal Access Token (mint one in the web UI).
-neev-cli auth login
-
-# 2. Save a context — 'context set' saves it AND makes it current in one step.
-#    After this, org/project are filled in automatically wherever they're needed.
-neev-cli context set demo <org-id> <project-id>
-
-# 3. A sandbox API key, for commands that run inside a sandbox (exec/fs/process).
-export NEEV_API_KEY="your-sandbox-api-key"
-```
-
-`quickstart.sh` does steps 1–2 for you:
+You need `neev-cli`, [`jq`](https://jqlang.github.io/jq/), a Personal Access Token and a
+sandbox API key (see [Getting started](../docs/getting-started.md#before-you-start)).
+Then save a context once:
 
 ```sh
-./examples/quickstart.sh <org-id> <project-id>
+./examples/quickstart.sh <org> <project>
 ```
 
-Don't know your ids? `neev-cli org list`, then `neev-cli project list --org-id <org-id>`.
+`<org>` and `<project>` are IDs or display names. To find them, see
+[Organizations and projects](https://docs.ai.neevcloud.com/getting-started/org-and-project#find-your-organization-id-and-project-id),
+or sign in and run `neev-cli context get`.
 
 ## Run
 
-Each script provisions real resources and cleans them up on exit, so the project
-needs available credits.
-
 ```sh
-./examples/quickstart.sh <org-id> <project-id>   # setup + a first look
-./examples/sandbox.sh                            # the sandbox resource
-./examples/agent.sh                              # the agent resource
-./examples/snapshots.sh                          # snapshot / restore / fork
-./examples/airuntime.sh                          # an AI runtime
-./examples/account.sh                            # orgs, projects, billing
+./examples/sandbox.sh
+./examples/networking.sh
+./examples/snapshots.sh
+./examples/agent.sh            # AGENT_TEMPLATE=codex-cli to try another agent
+./examples/account.sh
 ```
 
-## Conventions used here
+`airuntime.sh` creates a billed GPU runtime. Fill in the region, GPU configuration and
+plan in the script before running it.
 
-- **Context, not flags.** After `context set`/`context use`, commands read your
-  org and project from the current context — the scripts don't pass `--org-id` /
-  `--project-id`. (The one exception is `airuntime template`, where `--org-id`
-  selects the org catalogue vs. the platform one.)
-- **Positional ids.** Resources are addressed positionally:
-  `neev-cli sandbox get <id>`, `agent delete <id> --yes`,
-  `sandbox snapshot create <sandbox-id>`, `sandbox restore <sandbox-id> --snapshot-id <id>`.
-  (`sandbox fs` and `sandbox process` are the exception — they take `--sandbox-id`.)
-- **`-o json` to script.** The default output is a human-readable table; add
-  `-o json` and pipe through `jq` when you need to capture an id or field.
-- **`--yes` skips confirmation** on destructive commands (`-y` also works).
-- **Sandbox file paths are workspace-relative** — absolute paths are rejected.
+## Patterns worth copying
 
-## Environment reference
-
-| Variable | Used by | Notes |
-| -------- | ------- | ----- |
-| `NEEV_API_TOKEN` | lifecycle commands (via `auth login`) | Personal Access Token |
-| `NEEV_API_KEY` | runtime commands (`exec`/`fs`/`process`) | a sandbox API key |
-| `NEEV_ORG_ID` / `NEEV_PROJECT_ID` | `quickstart.sh` only | convenience inputs to the quickstart |
-| `AGENT_TEMPLATE` | `agent.sh` | agent template id (default `claude-code`) |
-
-## Scripting tip
-
-Commands print a table by default and JSON with `-o json`, so they compose with
-`jq`. Note the list envelope differs by resource — org/project lists use `.data[]`,
-while sandbox lists use `.items[]`:
-
-```sh
-neev-cli project list -o json | jq -r '.data[].id'
-neev-cli sandbox list -o json | jq -r '.items[].id'
-```
+- **Names, not IDs.** Each script names its sandbox and uses that name everywhere.
+- **`--wait`** on create, pause, resume, rollback and fork, so each step starts once the
+  last one has finished.
+- **`trap … EXIT`** to delete what the script created, whatever happens.
+- **`-o json | jq`** to read a field, such as a preview URL or snapshot ID.

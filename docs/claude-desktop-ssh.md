@@ -1,124 +1,77 @@
-# Connect to a sandbox from Claude Desktop (SSH)
+# Connect from Claude Desktop
 
-Run Claude Code *inside* a sandbox using the Claude Desktop app as your interface,
-over the sandbox's SSH endpoint. `neev-cli` wires up the SSH config; Claude
-Desktop's SSH sessions do the rest.
+Run Claude Code inside a NeevCloud agent or sandbox, with the Claude Desktop app as your
+interface. `neev-cli` writes the SSH configuration; Claude Desktop connects over SSH and
+does the rest. Your code and Claude Code's work stay in the cloud, not on your laptop.
 
-## Prerequisites
+## Before you start
 
-- `neev-cli` installed and signed in, with a context set (see
-  [getting-started](getting-started.md)).
-- Claude Desktop (the **Code** tab). The remote must run Linux or macOS —
-  sandboxes are Linux, so that's covered.
-- A **sandbox API key** exported as `NEEV_API_KEY`, visible to Claude Desktop
-  (see step 3).
+- `neev-cli` installed and on your `PATH`, signed in, with a context that holds your
+  sandbox API key. See [Getting started](./getting-started.md); the key is saved with
+  `neev-cli context set <name> --org <org> --project <project> --sandbox-api-key`.
+- Claude Desktop, using its **Code** tab.
 
-## 1. Pick a sandbox that can run Claude Code
+## 1. Create somewhere for Claude Code to run
 
-Claude Desktop installs Claude Code on the remote on first connect, and Claude
-Code then needs to reach `api.anthropic.com` — so the sandbox needs egress and a
-capable image. Two ways:
-
-**Option A — the `claude-code` agent (recommended).** Its image already has Claude
-Code installed and its egress already allows Anthropic, so there's nothing to
-install and no flags to add:
+**Option A: a Claude Code agent (recommended).** It comes with Claude Code installed and
+with network access to Anthropic's API, GitHub and the common package registries.
 
 ```sh
-AGENT_ID=$(neev-cli agent create --name claude-desktop --agent-template claude-code -o json | jq -r '.id')
-SANDBOX_ID=$(neev-cli agent get "$AGENT_ID" -o json | jq -r '.sandbox_id')
+neev-cli agent create --name claude-desktop --agent-template claude-code --wait
 ```
 
-**Option B — a plain sandbox with egress opened at create time** (egress is
-immutable afterward) so Desktop can install Claude Code and it can reach the API:
+**Option B: a plain sandbox.** Claude Desktop installs Claude Code on first connect, so
+the sandbox needs internet access:
 
 ```sh
-# Simplest — allow all egress (reliable for the first-connect auto-install):
-SANDBOX_ID=$(neev-cli sandbox create --name claude-desktop --allow-internet -o json | jq -r '.id')
-
-# Or lock it down — allow at least the API; add the hosts the installer fetches
-# from (npm / GitHub / CDN), or fall back to --allow-internet for the install step:
-#   neev-cli sandbox create --name claude-desktop \
-#     --allow api.anthropic.com --allow registry.npmjs.org --allow github.com
+neev-cli sandbox create --name claude-desktop --allow-internet --wait
 ```
 
-Wait until it is Ready:
+You can narrow its egress afterwards with `neev-cli sandbox update`.
+
+## 2. Write the SSH configuration
 
 ```sh
-until [ "$(neev-cli sandbox get "$SANDBOX_ID" -o json | jq -r '.phase')" = "Ready" ]; do sleep 2; done
+neev-cli agent ssh-config write claude-desktop      # Option A
+neev-cli sandbox ssh-config write claude-desktop    # Option B
 ```
 
-## 2. Write the SSH config block
+This adds a `Host claude-desktop` block to `~/.ssh/config`, pins the host key, and turns
+on connection sharing, which Claude Desktop uses for its parallel sessions. Check it with
+`ssh claude-desktop`.
 
-`neev-cli sandbox ssh-config` emits a `~/.ssh/config` Host block: a `ProxyCommand`
-that tunnels through `neev-cli sandbox ssh-proxy`, the `neev` login user, and a
-pinned host key. Claude Desktop accepts such a config Host alias as its SSH Host.
+## 3. Add the connection in Claude Desktop
+
+In the **Code** tab, open the environment menu and choose **Add SSH connection**:
+
+| Field | Value |
+| --- | --- |
+| SSH Host | `claude-desktop` |
+| SSH Port | leave empty |
+| Identity File | leave empty: NeevCloud authenticates the connection, so there is no key file |
+
+Start a session. You're now running Claude Code inside the sandbox, in `/workspace`.
+
+Each connection runs `neev-cli` with the API key from your current context. If you
+switch contexts later, switch back (`neev-cli context use <name>`) before connecting, or
+make `NEEV_API_KEY` available to Claude Desktop instead.
+
+## 4. Clean up
 
 ```sh
-neev-cli sandbox ssh-config "$SANDBOX_ID" --write
-neev-cli sandbox ssh-config --list          # confirm the alias it wrote
+neev-cli agent ssh-config delete claude-desktop
+neev-cli agent delete claude-desktop --yes
 ```
 
-The alias is the sandbox name (falling back to its id). On macOS/Linux the block
-also enables SSH connection multiplexing (`ControlMaster`), which Desktop relies on
-for its parallel channels.
-
-## 3. Make NEEV_API_KEY available to the ProxyCommand
-
-Claude Desktop runs the `ProxyCommand` (`neev-cli sandbox ssh-proxy …`) itself, so
-`neev-cli` needs the sandbox API key **from the environment at that moment**. The
-key is deliberately *not* written into the SSH config. Export it where Desktop can
-see it:
-
-- Launch Claude Desktop from a shell where the key is exported: `export NEEV_API_KEY=… && open -a "Claude"` (or your platform's launch), or
-- Set it in your shell profile / `launchctl setenv NEEV_API_KEY …` on macOS so a GUI-launched Desktop inherits it.
-
-## 4. Add the SSH connection in Claude Desktop
-
-In the **Code** tab, open the environment dropdown and choose **+ Add SSH
-connection**. Fill in:
-
-- **SSH Host**: the sandbox alias from step 2 (its name or id) — or a full `user@host`.
-- **SSH Port**: leave blank (defaults to 22 / your SSH config).
-- **Identity File**: leave empty — the sandbox authenticates at the edge, so there is no client key.
-
-Start the session. On first connect Desktop installs Claude Code on the sandbox;
-after that you get a Claude Code session running inside it, with `/workspace` as the
-project directory. SSH sessions support permission modes, connectors, plugins, and
-MCP servers.
-
-Administrators can pre-distribute these as `sshConfigs` in Claude Desktop's managed
-settings (so they appear in everyone's environment dropdown), and restrict them with
-`sshHostAllowlist` — see Claude Desktop's own documentation.
-
-## 5. Disconnect and clean up
-
-Close the session. When you're done with the sandbox, remove its config block and
-host-key pin, then delete the sandbox (or agent):
-
-```sh
-neev-cli sandbox ssh-config "$SANDBOX_ID" --remove
-neev-cli sandbox delete "$SANDBOX_ID" --yes
-# for Option A: neev-cli agent delete "$AGENT_ID" --yes
-```
-
-## Plain SSH
-
-The same config works from a terminal — you connect as `neev` through the
-ProxyCommand:
-
-```sh
-ssh <sandbox-name-or-id>
-```
+Use `sandbox` in place of `agent` for Option B. To keep your work but stop paying for
+compute, pause instead of deleting: `neev-cli agent pause claude-desktop`. A paused
+agent must be resumed before you connect again.
 
 ## Troubleshooting
 
-- **Permission denied / connection closes immediately** — `NEEV_API_KEY` isn't
-  visible to the ProxyCommand (step 3), or the key isn't valid for this sandbox.
-- **Claude Code fails to install on first connect** — the sandbox can't reach the
-  internet; recreate it with egress open (step 1, Option B) or use the `claude-code`
-  agent.
-- **Host key changed** — the sandbox was recreated; run `ssh-config --remove` then
-  `--write` again to re-pin the new key.
-- **Session hangs on "Setting up SSH Host"** — confirm the sandbox is `Ready`
-  (`neev-cli sandbox get <id>`) and that `neev-cli` is on your `PATH` (the
-  ProxyCommand invokes it by name).
+| Symptom | What to do |
+| --- | --- |
+| The connection closes straight away | The API key isn't available. Check `neev-cli context current` and that the context has a key (`context set … --sandbox-api-key`) |
+| Stuck on "Setting up SSH host" | Check the agent is `Ready` (`neev-cli agent get claude-desktop`) and that `neev-cli` is on the `PATH` Claude Desktop sees |
+| Claude Code fails to install (Option B) | The sandbox can't reach the internet. Run `neev-cli sandbox update claude-desktop --allow-internet` |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` | The sandbox was recreated. Run `ssh-config delete`, then `ssh-config write` again |
